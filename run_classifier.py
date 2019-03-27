@@ -6,7 +6,9 @@ import collections
 import csv
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
-os.environ["CUDA_VISIBLE_DEVICES"] = "6"
+os.environ["CUDA_VISIBLE_DEVICES"] = "4"
+
+from utils_fun import split_question
 import modeling
 import optimization
 import tokenization
@@ -23,15 +25,15 @@ flags.DEFINE_string("vocab_file", None, "The vocabulary file that the BERT model
 flags.DEFINE_string("output_dir", "./output", "The output directory where the model checkpoints will be written.")
 flags.DEFINE_string("init_checkpoint", "model_files/chinese_L-12_H-768_A-12/bert_model.ckpt", "from a pre-trained BERT model).")
 flags.DEFINE_bool( "do_lower_case", True, " Should be True for uncased models and False for cased models.")
-flags.DEFINE_integer("max_seq_length", 128, "than this will be padded.")
+flags.DEFINE_integer("max_seq_length", 512, "than this will be padded.")
 flags.DEFINE_bool("do_train", False, "Whether to run training.")
 flags.DEFINE_bool("do_eval", False, "Whether to run eval on the dev set.")
 flags.DEFINE_bool( "do_predict", False, "Whether to run the model in inference mode on the test set.")
 flags.DEFINE_integer("train_batch_size", 32, "Total batch size for training.")
 flags.DEFINE_integer("eval_batch_size", 32, "Total batch size for eval.")
-flags.DEFINE_integer("predict_batch_size", 8, "Total batch size for predict.")
-flags.DEFINE_float("learning_rate", 0.001, "The initial learning rate for Adam.")
-flags.DEFINE_float("num_train_epochs", 5.0, "Total number of training epochs to perform.")
+flags.DEFINE_integer("predict_batch_size", 4, "Total batch size for predict.")
+flags.DEFINE_float("learning_rate", 0.0001, "The initial learning rate for Adam.")
+flags.DEFINE_float("num_train_epochs", 10.0, "Total number of training epochs to perform.")
 flags.DEFINE_float("warmup_proportion", 0.1, "Proportion of training to perform linear learning rate warmup for. " "E.g., 0.1 = 10% of training.")
 flags.DEFINE_integer("iterations_per_loop", 1000, "How many steps to make in each estimator call.")
 
@@ -90,6 +92,7 @@ class MrpcProcessor(DataProcessor):
 	def get_train_examples(self, data_dir, num_labels):
 		return self._create_examples(
 				self._read_tsv(os.path.join(data_dir, "train.txt")), "train", num_labels)
+				#self._read_tsv(os.path.join(data_dir, "qa_testset_B.txt")), "train", num_labels)
 
 	def get_dev_examples(self, data_dir, num_labels):
 		return self._create_examples(
@@ -100,7 +103,7 @@ class MrpcProcessor(DataProcessor):
 
 
 	def get_labels(self):
-		with open("label_stat.txt",'r') as f2:
+		with open("data/label_stat.txt",'r') as f2:
 				txt = f2.readlines()
 		label_list = [x.strip().split()[1] for x in txt]
 		return label_list
@@ -277,7 +280,7 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
 			use_one_hot_embeddings=use_one_hot_embeddings)
 
 	def my_sigmoid_loss(logits, labels):
-		gamma = 0.99 *labels + 0.01
+		gamma = 0.9 *labels + 0.1
 		sign = 2 *labels - 1
 		#res = 1 - tf.log1p( gamma*logits/(1+ tf.abs(logits)) )
 		res = gamma * (1 - tf.log1p(sign* logits/(1+ tf.abs(logits))))
@@ -331,12 +334,14 @@ def main(_):
 
 	if 0:
 		train_examples = processor.get_train_examples(FLAGS.data_dir, num_labels)
-		train_file = os.path.join(FLAGS.output_dir, "train.tf_record")
+		#train_file = os.path.join(FLAGS.output_dir, "l512_train.tf_record")
+		train_file = os.path.join(FLAGS.output_dir, "testB_train.tf_record")
 		file_based_convert_examples_to_features(
 			train_examples, label_list, FLAGS.max_seq_length, tokenizer, train_file)
 
+	if 0:
 		eval_examples = processor.get_dev_examples(FLAGS.data_dir, num_labels)
-		eval_file = os.path.join(FLAGS.output_dir, "eval.tf_record")
+		eval_file = os.path.join(FLAGS.output_dir, "l512_eval.tf_record")
 		file_based_convert_examples_to_features(
 			eval_examples, label_list, FLAGS.max_seq_length, tokenizer, eval_file)
 
@@ -359,56 +364,96 @@ def main(_):
 									bert_config, is_training, input_ids, input_mask, segment_ids,
 									labels, num_labels, use_one_hot_embeddings)
 	mylogits = tf.multiply(logits,1, name="logits")
+	optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate).minimize(loss)
 
-	input_file = "output/train.tf_record"
+	input_file = "output/testB_train.tf_record"
+	batch_size = FLAGS.train_batch_size
+	tb_input_ids2, tb_input_mask2, tb_segment_ids2, tb_labels2 = get_input_data(input_file, seq_len, batch_size, num_labels)
+
+	input_file = "output/l512_train.tf_record"
 	batch_size = FLAGS.train_batch_size
 	input_ids2, input_mask2, segment_ids2, labels2 = get_input_data(input_file, seq_len, batch_size, num_labels)
-	optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate).minimize(loss)
 
-	val_input_file = "output/eval.tf_record"
+	val_input_file = "output/l512_eval.tf_record"
+	#val_input_file = "output/train.tf_record"
 	val_batch_size = FLAGS.eval_batch_size
 	val_input_ids2, val_input_mask2, val_segment_ids2, val_labels2 = get_input_data(val_input_file, seq_len, val_batch_size, num_labels)
-	optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate).minimize(loss)
 
-	if 1:
+	if 0:
 		tvars = tf.trainable_variables()
 		initialized_variable_names = {}
-		(assignment_map, initialized_variable_names
-		) = modeling.get_assignment_map_from_checkpoint(tvars, FLAGS.init_checkpoint)
+		assignment_map, initialized_variable_names = modeling.get_assignment_map_from_checkpoint(tvars, FLAGS.init_checkpoint)
 		tf.train.init_from_checkpoint(FLAGS.init_checkpoint, assignment_map)
+
+	#assignment_map, initialized_variable_names = modeling.get_assignment_map_from_checkpoint(tvars, FLAGS.init_checkpoint)
+	
+	#tvars = tf.global_variables()
+	#assignment_map, initialized_variable_names = modeling.get_assignment_map_from_checkpoint(tvars, latest_checkpoint)
+	#not_initialized_vars = [v for v in tvars if v.name not in initialized_variable_names]
+	#tf.logging.info('all size %s; not initialized size %s' % (len(tvars), len(not_initialized_vars)))
+
+	#saver = tf.train.Saver([v for v in tvars if v.name in initialized_variable_names])
 
 	init_global = tf.global_variables_initializer()
 	saver=tf.train.Saver()
-
-
 	with tf.Session() as sess:
 		sess.run(init_global)
-		if 0:
-			lastest_checkpoint = tf.train.latest_checkpoint('output')
-			saver.restore(sess, lastest_checkpoint)
-			print("checkpoint restored from %s" % lastest_checkpoint)
+		#if len(not_initialized_vars):
+		#	sess.run(tf.variables_initializer(not_initialized_vars))
+		#saver.restore(sess, FLAGS.init_checkpoint)
+		#for v in not_initialized_vars:
+		#	tf.logging.info('not initialized: %s' % (v.name))
+		if 1:
+			latest_checkpoint = tf.train.latest_checkpoint('output')
+			saver.restore(sess, latest_checkpoint)
+			print("checkpoint restored from %s" % latest_checkpoint)
 
+		#tf.summary.FileWriter("output/",sess.graph)
+		vr = []; vp=[]
 		for i in range(num_train_steps):
-			ids, mask, segment,y = sess.run([input_ids2, input_mask2, segment_ids2, labels2])
+			if i % 13 == 1:
+				#print('~~~~~~~use testset B')
+				ids, mask, segment,y = sess.run([tb_input_ids2, tb_input_mask2, tb_segment_ids2, tb_labels2])
+			else:
+				ids, mask, segment,y = sess.run([input_ids2, input_mask2, segment_ids2, labels2])
+				#if i % 5 == 1:
+				#	ids, mask, segment, y = split_question(ids, mask, segment, y)
+
 			feed = {input_ids:ids, input_mask: mask, segment_ids: segment, labels:y}
 			_, out_loss, out_logits = sess.run([optimizer, loss,logits], feed_dict=feed)
-	
-			if i % 20 == 0:	
-				ids, mask, segment,y = sess.run([val_input_ids2, val_input_mask2, val_segment_ids2, val_labels2])
-				feed = {input_ids:ids, input_mask: mask, segment_ids: segment, labels:y}
-				val_loss, val_logits = sess.run([loss, logits], feed_dict=feed)
 
-				val_recall = np.mean(y[np.where(val_logits>0)])
-				val_precision = np.mean(np.int16(val_logits[y==1]>0))
+			
+			ids, mask, segment,y = sess.run([val_input_ids2, val_input_mask2, val_segment_ids2, val_labels2])
+			feed = {input_ids:ids, input_mask: mask, segment_ids: segment, labels:y}
+			val_loss, val_logits = sess.run([loss, logits], feed_dict=feed)
 
-				log_info = "epoch-%d step %d/%d - loss: %f val_loss: %f\tval_recall: %f\tval_precision: %f" % (
-						1+i/num_epochs_steps, i, num_train_steps, out_loss, val_loss, val_recall, val_precision)
+			#val_recall = np.mean(y[np.where(val_logits>0)])
+			val_recall = np.array(y[np.where(val_logits>0)]).flatten().tolist()
+			#val_precision = np.mean(np.int16(val_logits[y==1]>0))
+			val_precision = np.array(np.int16(val_logits[y==1]>0)).flatten().tolist()
+			vr += val_recall
+			vp += val_precision
+
+			if i % 100 == 0 and len(vr) > 10:
+				val_recall = np.mean(vr)
+				val_precision = np.mean(vp)
+				log_info = "epoch-%d step %d/%d - loss: %f val_loss: %f\trecall: %f precision: %f" % (
+					1+i/num_epochs_steps, i, num_train_steps, out_loss, val_loss, val_recall, val_precision)
 				print(log_info)
-			if i % 100 == 0:	
-				saver.save(sess, 'output/bert_v1.ckpt')
+				vr = []; vp=[]
+			if i % 1000 == 1 and i > 100:	
+				saver.save(sess, 'output/bert_v2.ckpt')
+				print('\ncheckpoint saved\n')
+			if i % 2000 == 100:
+				output_graph_def = graph_util.convert_variables_to_constants(sess, sess.graph_def,
+																 output_node_names=["input_ids", "input_mask", "logits", "segment_ids"])
+				with tf.gfile.FastGFile('output/v2_testB_model.pb', mode='wb') as f:
+					f.write(output_graph_def.SerializeToString())
+				print('\nmodel exported!\n')
+
 		output_graph_def = graph_util.convert_variables_to_constants(sess, sess.graph_def,
-																 output_node_names=["input_ids", "input_mask", "logits"])
-		with tf.gfile.FastGFile('output/model.pb', mode='wb') as f:
+																 output_node_names=["input_ids", "input_mask", "logits", "segment_ids"])
+		with tf.gfile.FastGFile('output/v2_testB_model.pb', mode='wb') as f:
 			f.write(output_graph_def.SerializeToString())
 
 
