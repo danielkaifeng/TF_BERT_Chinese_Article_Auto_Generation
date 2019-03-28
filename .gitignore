@@ -4,3 +4,4 @@ output
 __pycache__
 requirements.txt
 model_files/*
+*log
