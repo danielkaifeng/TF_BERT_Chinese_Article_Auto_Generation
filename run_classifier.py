@@ -28,11 +28,11 @@ flags.DEFINE_bool( "do_lower_case", True, " Should be True for uncased models an
 flags.DEFINE_integer("max_seq_length", 512, "than this will be padded.")
 flags.DEFINE_bool("do_train", False, "Whether to run training.")
 flags.DEFINE_bool("do_eval", False, "Whether to run eval on the dev set.")
-flags.DEFINE_bool( "do_predict", False, "Whether to run the model in inference mode on the test set.")
-flags.DEFINE_integer("train_batch_size", 32, "Total batch size for training.")
-flags.DEFINE_integer("eval_batch_size", 32, "Total batch size for eval.")
+flags.DEFINE_bool("do_predict", False, "Whether to run the model in inference mode on the test set.")
+flags.DEFINE_integer("train_batch_size", 4, "Total batch size for training.")
+flags.DEFINE_integer("eval_batch_size", 4, "Total batch size for eval.")
 flags.DEFINE_integer("predict_batch_size", 4, "Total batch size for predict.")
-flags.DEFINE_float("learning_rate", 0.0001, "The initial learning rate for Adam.")
+flags.DEFINE_float("learning_rate", 0.00001, "The initial learning rate for Adam.")
 flags.DEFINE_float("num_train_epochs", 10.0, "Total number of training epochs to perform.")
 flags.DEFINE_float("warmup_proportion", 0.1, "Proportion of training to perform linear learning rate warmup for. " "E.g., 0.1 = 10% of training.")
 flags.DEFINE_integer("iterations_per_loop", 1000, "How many steps to make in each estimator call.")
@@ -411,13 +411,13 @@ def main(_):
 		#tf.summary.FileWriter("output/",sess.graph)
 		vr = []; vp=[]
 		for i in range(num_train_steps):
-			if i % 13 == 1:
+			if i % 13 == 1 and False:
 				#print('~~~~~~~use testset B')
 				ids, mask, segment,y = sess.run([tb_input_ids2, tb_input_mask2, tb_segment_ids2, tb_labels2])
 			else:
 				ids, mask, segment,y = sess.run([input_ids2, input_mask2, segment_ids2, labels2])
-				#if i % 5 == 1:
-				#	ids, mask, segment, y = split_question(ids, mask, segment, y)
+				if i % 2 == 1:
+					ids, mask, segment, y = split_question(ids, mask, segment, y)
 
 			feed = {input_ids:ids, input_mask: mask, segment_ids: segment, labels:y}
 			_, out_loss, out_logits = sess.run([optimizer, loss,logits], feed_dict=feed)

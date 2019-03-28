@@ -11,7 +11,9 @@ def split_question(ids, mask, segment,y):
 			#filter content longer than max sequence length, ex.512
 			if idx+64>len(each_id):
 				continue
-			
+			if len(new_label) >= 32:
+				break		
+	
 			new_ids.append(each_id[idx:idx+64].tolist() + padding)
 			new_mask.append(each_mask[idx:idx+64].tolist() + padding)
 			new_segment.append(each_segment[idx:idx+64].tolist() + padding)

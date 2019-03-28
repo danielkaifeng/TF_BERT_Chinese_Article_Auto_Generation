@@ -62,7 +62,8 @@ label_dict = get_type_dict()
 vocab_file = "model_files/chinese_L-12_H-768_A-12/vocab.txt"
 tokenizer = tokenization.FullTokenizer(vocab_file=vocab_file, do_lower_case=True)
 
-pb_file = 'output/model.pb'
+pb_file = 'output/v2_testB_model.pb'
+#pb_file = '../003_test_module/model_files/v2.2_testB_model.pb'
 with tf.gfile.FastGFile(pb_file, "rb") as f:
     graph_def = tf.GraphDef()
     graph_def.ParseFromString(f.read())
@@ -91,7 +92,7 @@ def inference(question):
 	z[z<-10] = -10
 	y_ = 1/(1+np.exp(-z))
 
-	idx = np.where(y_>0.5)[0]
+	idx = np.where(y_>0.75)[0]
 	#idx = np.argmax(y_)
 	prob = y_[idx]
 	label = [label_dict[x] for x in idx]
@@ -99,33 +100,72 @@ def inference(question):
 	pred_dict = {}
 	for y,p in zip(label,prob):
 		pred_dict[y] = p
-	out_info = '' 
+	out_info = ''
+ 
+	sq_list = []
+	prob_list = []
 	for y,p in sorted(pred_dict.items(), key=lambda x:x[1], reverse=True):
+		buf = y.split('-')
+		assert len(buf) == 2
+		jf, sq = buf
+		if len(sq_list) == 0:
+			main_jf = jf	
+		if jf != main_jf:
+			continue
+	
+		sq_list.append(sq)
+		prob_list.append(p)
 		out_info += y + ',' + str(round(p,3)) + '; '
+	if len(sq_list) == 0:
+		return '',0,0,0 
+	else:
+		return ','.join(sq_list), [main_jf + '-' +x for x in sq_list] ,main_jf, round(np.mean(prob_list),3)
+	#for y,p in sorted(pred_dict.items(), key=lambda x:x[1], reverse=True):
+	#	out_info += y + ',' + str(round(p,3)) + '; '
+	#return out_info.strip('; '), label
 
-	return out_info.strip('; '), label
 
 if __name__ == "__main__":
 	#filename = "data/qa_testset_B.txt"
-	filename = "data/qa_testset_C.txt"
+	#filename = "data/qa_testset_C.txt"
+	filename = "data/labelled_qa_testset_B.txt"
 	with open(filename,'r') as f1:
 		txt = f1.readlines()
 
 	#question = "合同没到期，公司要裁员，如何赔偿"
 	correct = 0
+	FP = 0
 	total = 0
+	total2 = 0
+	cate_acc = {}
 	for line in txt:
 		l = line.strip().split('\t')
 		question = l[1]
 		y = l[2]
-		y_, pred = inference(question)
-		for label in y.split(','):
-			total += 1
-			if label in pred:
-				correct += 1
+		y_, pred, jf, prob = inference(question)
+		if prob == 0:
+			continue	
 
-		print(question + '\n' + 'prediction: ' + y_ + '\n' + 'label: ' + y + '\n')
-	print("precision: %f" % (float(correct)/total))
+		y2 = y.split(',')
+		gt_jf = y2[0].split('-')[0]
+		gt_sq = ','.join([x.split('-')[1] for x in y2])
+
+		total += 1
+		total2 += 1
+		TP_num = len([x for x in y.split(',') if x in pred])
+		FP_num = len([x for x in pred if x in y])
+		if TP_num == len(y.split(',')):
+			correct += 1
+		elif TP_num != 0:
+			correct += 0.5
+		if FP_num == len(pred):
+			FP += 1
+		elif FP_num != 0:
+			FP += 0.5
+
+		print(question + '\n' + 'prediction: ' + jf + '\t' +  y_ + '\n' + 'label: ' + gt_jf + '\t' + gt_sq +  '\n')
+	print("recall: %f" % (float(correct)/total))
+	print("precision: %f" % (float(FP)/total2))
 
 
 
